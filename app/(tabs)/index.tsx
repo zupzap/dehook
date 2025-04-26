@@ -1,483 +1,508 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
+import { StyleSheet, Platform, TouchableOpacity, ScrollView, TextInput, View, Alert, FlatList, Switch } from 'react-native';
+import React, { useEffect, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppUsage } from '@/hooks/useAppUsage';
-import { AppUsage, Challenge, UserChallenge } from '@/data/mockData';
+import {
+  EventFrequency,
+  checkForPermission,
+  queryUsageStats,
+  queryEvents,
+  showUsageAccessSettings,
+} from '@brighthustle/react-native-usage-stats-manager';
+
+import ParallaxScrollView from '@/components/ParallaxScrollView';
+import { ThemedText } from '@/components/ThemedText';
+import { ThemedView } from '@/components/ThemedView';
+import { AppUsageTable } from '@/components/AppUsageTable';
+import { useRealAppUsage, AppUsageItem } from '@/hooks/useRealAppUsage';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
-import { useRouter } from 'expo-router';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const router = useRouter();
+  
+  const [usageStats, setUsageStats] = useState<AppUsageItem[]>([]);
+  const [filteredStats, setFilteredStats] = useState<AppUsageItem[]>([]);
+  const [allApps, setAllApps] = useState<{packageName: string, appName: string, selected: boolean}[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [permission, setPermission] = useState<boolean | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [showFiltered, setShowFiltered] = useState(false);
+  const [showAppSelection, setShowAppSelection] = useState(false);
+  const [showOverview, setShowOverview] = useState(true);
   
   const { 
-    appUsage, 
-    userProfile, 
-    getWeeklyUsage, 
-    getGoalPercentage, 
-    getMostUsedApps, 
-    getOverGoalApps,
-    isOverWeeklyGoal,
-    getUserActiveChallenges,
-    getAppById
-  } = useAppUsage();
-  
-  const mostUsedApps = getMostUsedApps().slice(0, 4); // Top 4 most used apps
-  const overGoalApps = getOverGoalApps();
-  const userActiveChallenges = getUserActiveChallenges();
-  
-  const renderAppUsageItem = ({ item }: { item: AppUsage }) => {
-    const weeklyUsage = getWeeklyUsage(item);
-    const isOverGoal = isOverWeeklyGoal(item);
-    
-    // Calculate remaining minutes and percentage
-    const remainingMinutes = Math.max(0, item.weeklyGoal - weeklyUsage);
-    const remainingPercentage = Math.min(100, Math.round((remainingMinutes / item.weeklyGoal) * 100));
-    const isAlmostDepleted = remainingPercentage <= 20;
-    
-    return (
-      <TouchableOpacity 
-        style={[styles.appItem, { borderColor: isAlmostDepleted ? '#FF3B30' : '#34C759' }]}
-        activeOpacity={0.7}
-      >
-        <View style={styles.appHeader}>
-          <View style={[styles.appIconContainer, { backgroundColor: item.color }]}>
-            <Ionicons name={item.icon as any} size={24} color="#FFFFFF" />
-          </View>
-          <View style={styles.appInfo}>
-            <Text style={[styles.appName, { color: colors.text }]}>{item.name}</Text>
-            <Text style={[styles.appCategory, { color: colors.icon }]}>
-              {item.category.charAt(0).toUpperCase() + item.category.slice(1)}
-            </Text>
-          </View>
-          <View style={styles.appUsageInfo}>
-            <Text style={[styles.usageText, { color: isAlmostDepleted ? '#FF3B30' : '#34C759', fontWeight: '700' }]}>
-              {Math.floor(remainingMinutes / 60)}h {remainingMinutes % 60}m
-            </Text>
-            <Text style={[styles.goalText, { color: colors.icon, fontWeight: '500' }]}>
-              Left of {Math.floor(item.weeklyGoal / 60)}h {item.weeklyGoal % 60}m
-            </Text>
-          </View>
-        </View>
+    fetchUsageStats,
+    requestPermission,
+    getUniqueApps
+  } = useRealAppUsage();
+
+  useEffect(() => {
+    async function fetchInitialUsageStats() {
+      setLoading(true);
+      setError(null);
+      try {
+        const hasPermission = await checkForPermission();
+        setPermission(hasPermission);
         
-        <View style={styles.progressContainer}>
-          <View 
-            style={[
-              styles.progressBar, 
-              { 
-                width: `${remainingPercentage}%`,
-                backgroundColor: isAlmostDepleted ? '#FF3B30' : '#34C759'
+        if (!hasPermission) {
+          // Show the usage access settings page
+          showUsageAccessSettings('');
+          setError('Usage access permission is required. Please enable it in settings and restart the app.');
+          setLoading(false);
+          return;
+        }
+        
+        // Get events for the last 7 days
+        const end = Date.now();
+        const start = end - 7 * 24 * 60 * 60 * 1000;
+        
+        // Set default date range for filter
+        const startDateObj = new Date(start);
+        const endDateObj = new Date(end);
+        setStartDate(formatDateForInput(startDateObj));
+        setEndDate(formatDateForInput(endDateObj));
+        
+        // Fetch usage stats
+        const stats = await fetchUsageStats(start, end);
+        setUsageStats(stats);
+        
+        // Extract unique apps for selection
+        const uniqueApps = getUniqueApps();
+        setAllApps(uniqueApps);
+      } catch (e: any) {
+        console.error('Main error:', e);
+        setError(e?.message || 'Failed to fetch usage stats');
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchInitialUsageStats();
+  }, []);
+  
+  // Function to check and request permission
+  const checkAndRequestPermission = async () => {
+    try {
+      const hasPermission = await checkForPermission();
+      if (!hasPermission) {
+        Alert.alert(
+          'Permission Required',
+          'This app needs usage access permission to track app usage. Please enable it in the settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              onPress: () => {
+                showUsageAccessSettings('');
               }
-            ]} 
-          />
-        </View>
-      </TouchableOpacity>
+            }
+          ]
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error('Permission check error:', error);
+      return false;
+    }
+  };
+
+  // Function to filter stats based on selected time range and apps
+  const filterStats = async () => {
+    if (!startDate || !endDate) {
+      setError('Please select both start and end date/time');
+      return;
+    }
+    
+    try {
+      const startTimestamp = new Date(startDate).getTime();
+      const endTimestamp = new Date(endDate).getTime();
+      
+      if (isNaN(startTimestamp) || isNaN(endTimestamp)) {
+        setError('Invalid date format. Please use YYYY-MM-DD HH:MM format');
+        return;
+      }
+      
+      if (startTimestamp >= endTimestamp) {
+        setError('Start date must be before end date');
+        return;
+      }
+      
+      setLoading(true);
+      setError(null);
+      
+      // Get selected app package names
+      const selectedPackages = allApps
+        .filter(app => app.selected)
+        .map(app => app.packageName);
+      
+      // Fetch stats for the selected time period
+      const stats = await fetchUsageStats(startTimestamp, endTimestamp, selectedPackages);
+      setFilteredStats(stats);
+      setShowFiltered(true);
+    } catch (err: any) {
+      setError('Error parsing dates: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Toggle app selection
+  const toggleAppSelection = (packageName: string) => {
+    setAllApps(prevApps => 
+      prevApps.map(app => 
+        app.packageName === packageName 
+          ? { ...app, selected: !app.selected } 
+          : app
+      )
     );
   };
   
-  const renderActiveChallengeItem = ({ item }: { item: { challenge: Challenge; userChallenge: UserChallenge } }) => {
-    const { challenge, userChallenge } = item;
-    const app = getAppById(challenge.appId);
-    if (!app) return null;
-    
-    const progress = Math.min(Math.round((userChallenge.currentUsage / challenge.targetMinutes) * 100), 100);
-    
-    return (
-      <TouchableOpacity 
-        style={[styles.challengeItem, { backgroundColor: colors.background }]}
-        activeOpacity={0.7}
-        onPress={() => router.push('/goals')}
-      >
-        <View style={styles.challengeHeader}>
-          <View style={[styles.appIconContainer, { backgroundColor: app.color }]}>
-            <Ionicons name={app.icon as any} size={24} color="#FFFFFF" />
-          </View>
-          <View style={styles.challengeInfo}>
-            <Text style={[styles.challengeTitle, { color: colors.text }]}>
-              {challenge.title}
-            </Text>
-            <Text style={[styles.challengeDescription, { color: colors.icon }]}>
-              {challenge.description}
-            </Text>
-          </View>
-        </View>
-        
-        <View style={styles.progressSection}>
-          <View style={styles.progressLabelContainer}>
-            <Text style={[styles.progressLabel, { color: colors.text }]}>
-              Progress: {progress}%
-            </Text>
-            <Text style={[styles.progressMinutes, { color: colors.icon }]}>
-              {userChallenge.currentUsage} / {challenge.targetMinutes} minutes
-            </Text>
-          </View>
-          
-          <View style={styles.progressContainer}>
-            <View 
-              style={[
-                styles.progressBar, 
-                { 
-                  width: `${progress}%`,
-                  backgroundColor: progress >= 100 ? '#4CAF50' : colors.tint
-                }
-              ]} 
-            />
-          </View>
-        </View>
-      </TouchableOpacity>
+  // Toggle all apps selection
+  const toggleAllApps = (selected: boolean) => {
+    setAllApps(prevApps => 
+      prevApps.map(app => ({ ...app, selected }))
     );
   };
+  
+  // Format date for display
+  const formatDateForInput = (date: Date) => {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  };
+  
+  // Set default date range (last 24 hours)
+  useEffect(() => {
+    const end = new Date();
+    const start = new Date(end.getTime() - 24 * 60 * 60 * 1000); // 24 hours ago
+    
+    setStartDate(formatDateForInput(start));
+    setEndDate(formatDateForInput(end));
+  }, []);
   
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+    <ParallaxScrollView
+      headerBackgroundColor={{ light: '#f5f5f5', dark: '#1a1a1a' }}
+      headerImage={<View style={styles.headerPlaceholder} />}
+    >
       {/* Header Section */}
-      <View style={styles.headerSection}>
-        <View style={styles.welcomeContainer}>
-          <Text style={[styles.welcomeText, { color: colors.text, fontWeight: '700' }]}>
-            Welcome back, {userProfile.name}!
-          </Text>
-          <Text style={[styles.streakText, { color: colors.icon, fontWeight: '600' }]}>
-            🔥 {userProfile.streakDays} day streak
-          </Text>
-        </View>
-        
-        <View style={[styles.statsCard, { backgroundColor: colors.background }]}>
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: colors.text, fontWeight: '700' }]}>{userProfile.points}</Text>
-            <Text style={[styles.statLabel, { color: colors.icon, fontWeight: '500' }]}>Points</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: colors.text, fontWeight: '700' }]}>
-              {Math.floor(userProfile.totalSavedTime / 60)}h {userProfile.totalSavedTime % 60}m
-            </Text>
-            <Text style={[styles.statLabel, { color: colors.icon, fontWeight: '500' }]}>Saved</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: colors.text, fontWeight: '700' }]}>{overGoalApps.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.icon, fontWeight: '500' }]}>Over Goal</Text>
-          </View>
-        </View>
-      </View>
+      <ThemedView style={styles.titleContainer}>
+        <ThemedText type="title">DeHook</ThemedText>
+        <ThemedText type="subtitle" style={styles.subtitle}>Track and manage your app usage</ThemedText>
+      </ThemedView>
       
-      {/* Active Challenges Section */}
-      {userActiveChallenges.length > 0 && (
-        <View style={styles.sectionContainer}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Active Challenges</Text>
-            <TouchableOpacity onPress={() => router.push('/goals')}>
-              <Text style={[styles.seeAllText, { color: colors.tint }]}>See All</Text>
+      {/* Permission Warning */}
+      {!permission && (
+        <ThemedView style={[styles.permissionContainer, { backgroundColor: colors.tint + '20' }]}>
+          <View style={styles.permissionIconContainer}>
+            <Ionicons name="warning-outline" size={24} color={colors.tint} />
+          </View>
+          <View style={styles.permissionTextContainer}>
+            <ThemedText style={styles.permissionTitle}>Permission Required</ThemedText>
+            <ThemedText style={styles.permissionText}>
+              This app needs usage access permission to track app usage.
+            </ThemedText>
+          </View>
+          <TouchableOpacity 
+            style={[styles.permissionButton, { backgroundColor: colors.tint }]}
+            onPress={checkAndRequestPermission}
+          >
+            <ThemedText style={styles.permissionButtonText}>Grant Access</ThemedText>
+          </TouchableOpacity>
+        </ThemedView>
+      )}
+      
+      {/* Overview Section */}
+      {showOverview && (
+        <ThemedView style={styles.overviewContainer}>
+          <View style={styles.overviewHeader}>
+            <ThemedText type="subtitle">Usage Overview</ThemedText>
+            <TouchableOpacity onPress={() => setShowAppSelection(!showAppSelection)}>
+              <ThemedText style={{ color: colors.tint }}>
+                {showAppSelection ? 'Hide App Selection' : 'Select Apps'}
+              </ThemedText>
             </TouchableOpacity>
           </View>
           
-          <FlatList
-            data={userActiveChallenges}
-            renderItem={renderActiveChallengeItem}
-            keyExtractor={(item) => item.userChallenge.id}
-            scrollEnabled={false}
-          />
-        </View>
+          {/* App Selection Section */}
+          {showAppSelection && (
+            <ThemedView style={styles.appSelectionWrapper}>
+              <ThemedView style={styles.selectAllContainer}>
+                <TouchableOpacity 
+                  style={[styles.selectAllButton, { backgroundColor: colors.tint + '20' }]} 
+                  onPress={() => toggleAllApps(true)}
+                >
+                  <ThemedText>Select All</ThemedText>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.selectAllButton, { backgroundColor: colors.background }]} 
+                  onPress={() => toggleAllApps(false)}
+                >
+                  <ThemedText>Deselect All</ThemedText>
+                </TouchableOpacity>
+              </ThemedView>
+              
+              <FlatList
+                data={allApps}
+                keyExtractor={(item, index) => `app-${index}`}
+                numColumns={2}
+                style={styles.appSelectionGrid}
+                renderItem={({ item }) => (
+                  <TouchableOpacity 
+                    style={[styles.appSelectionItem, item.selected && styles.appSelectionItemSelected]}
+                    onPress={() => toggleAppSelection(item.packageName)}
+                  >
+                    <View style={styles.appSelectionItemContent}>
+                      <View style={[styles.appIconPlaceholder, { backgroundColor: item.selected ? colors.tint + '40' : colors.icon + '20' }]}>
+                        <Ionicons 
+                          name="apps" 
+                          size={18} 
+                          color={item.selected ? colors.tint : colors.icon} 
+                        />
+                      </View>
+                      <ThemedText numberOfLines={1} style={styles.appName}>{item.appName}</ThemedText>
+                      <Switch 
+                        value={item.selected}
+                        onValueChange={() => toggleAppSelection(item.packageName)}
+                        trackColor={{ false: '#767577', true: colors.tint + '60' }}
+                        thumbColor={item.selected ? colors.tint : '#f4f3f4'}
+                      />
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            </ThemedView>
+          )}
+          
+          {/* Date Filter Section */}
+          <ThemedView style={styles.dateFilterContainer}>
+            <ThemedText style={styles.dateFilterTitle}>Filter by Date Range</ThemedText>
+            
+            <ThemedView style={styles.datePickerContainer}>
+              <ThemedText>Start:</ThemedText>
+              <TextInput
+                style={styles.dateInput}
+                value={startDate}
+                onChangeText={setStartDate}
+                placeholder="YYYY-MM-DD HH:MM"
+              />
+            </ThemedView>
+            
+            <ThemedView style={styles.datePickerContainer}>
+              <ThemedText>End:</ThemedText>
+              <TextInput
+                style={styles.dateInput}
+                value={endDate}
+                onChangeText={setEndDate}
+                placeholder="YYYY-MM-DD HH:MM"
+              />
+            </ThemedView>
+            
+            <TouchableOpacity 
+              style={[styles.filterButton, { backgroundColor: colors.tint }]}
+              onPress={filterStats}
+              disabled={loading}
+            >
+              <ThemedText style={styles.filterButtonText}>
+                {loading ? 'Loading...' : 'Show Usage Stats'}
+              </ThemedText>
+            </TouchableOpacity>
+          </ThemedView>
+        </ThemedView>
       )}
       
-      {/* Most Used Apps Section */}
-      <View style={styles.sectionContainer}>
-        <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Most Used Apps</Text>
-          <TouchableOpacity>
-            <Text style={[styles.seeAllText, { color: colors.tint }]}>See All</Text>
-          </TouchableOpacity>
-        </View>
-        
-        <FlatList
-          data={mostUsedApps}
-          renderItem={renderAppUsageItem}
-          keyExtractor={(item) => item.id}
-          scrollEnabled={false}
+      {/* Error Message */}
+      {error && (
+        <ThemedText style={styles.errorText}>{error}</ThemedText>
+      )}
+      
+      {/* Usage Stats Section */}
+      <ThemedView style={styles.usageStatsContainer}>
+        <ThemedText type="subtitle">
+          {showFiltered 
+            ? `App Usage Stats (${new Date(startDate).toLocaleDateString()} to ${new Date(endDate).toLocaleDateString()})`
+            : 'App Usage Stats (last 7 days)'}
+        </ThemedText>
+        <AppUsageTable 
+          usageStats={showFiltered ? filteredStats : usageStats} 
+          loading={loading} 
+          error={error} 
         />
-      </View>
-      
-      {/* Weekly Summary Section */}
-      <View style={styles.sectionContainer}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Weekly Summary</Text>
-        
-        <View style={[styles.summaryCard, { backgroundColor: colors.background }]}>
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryItem}>
-              <Ionicons name="checkmark-circle" size={24} color="#4CAF50" />
-              <Text style={[styles.summaryValue, { color: colors.text }]}>
-                {appUsage.length - overGoalApps.length}/{appUsage.length}
-              </Text>
-              <Text style={[styles.summaryLabel, { color: colors.icon }]}>Goals Met</Text>
-            </View>
-            
-            <View style={styles.summaryItem}>
-              <Ionicons name="time-outline" size={24} color={colors.tint} />
-              <Text style={[styles.summaryValue, { color: colors.text }]}>
-                {Math.floor(userProfile.totalSavedTime / 60)}h {userProfile.totalSavedTime % 60}m
-              </Text>
-              <Text style={[styles.summaryLabel, { color: colors.icon }]}>Time Saved</Text>
-            </View>
-          </View>
-          
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryItem}>
-              <Ionicons name="trending-down" size={24} color="#FF6B6B" />
-              <Text style={[styles.summaryValue, { color: colors.text }]}>
-                {overGoalApps.length > 0 ? overGoalApps[0].name : 'None'}
-              </Text>
-              <Text style={[styles.summaryLabel, { color: colors.icon }]}>Most Overused</Text>
-            </View>
-            
-            <View style={styles.summaryItem}>
-              <Ionicons name="trophy-outline" size={24} color="#FFD700" />
-              <Text style={[styles.summaryValue, { color: colors.text }]}>
-                {userProfile.points}
-              </Text>
-              <Text style={[styles.summaryLabel, { color: colors.icon }]}>Total Points</Text>
-            </View>
-          </View>
-        </View>
-      </View>
-      
-      {/* Quick Actions */}
-      <View style={styles.sectionContainer}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Actions</Text>
-        
-        <View style={styles.actionsContainer}>
-          <TouchableOpacity 
-            style={[styles.actionButton, { backgroundColor: colors.tint }]}
-            onPress={() => router.push('/goals')}
-          >
-            <Ionicons name="trophy-outline" size={24} color="#FFFFFF" />
-            <Text style={styles.actionText}>Join Challenge</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}
-            onPress={() => router.push('/rewards')}
-          >
-            <Ionicons name="gift-outline" size={24} color="#FFFFFF" />
-            <Text style={styles.actionText}>Rewards</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.actionButton, { backgroundColor: '#FF6B6B' }]}
-          >
-            <Ionicons name="alert-circle-outline" size={24} color="#FFFFFF" />
-            <Text style={styles.actionText}>Over Goal</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </ScrollView>
+      </ThemedView>
+    </ParallaxScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  contentContainer: {
-    padding: 16,
-  },
-  headerSection: {
-    marginBottom: 24,
-  },
-  welcomeContainer: {
+  titleContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 4,
     marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
   },
-  welcomeText: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  streakText: {
-    fontSize: 16,
-  },
-  statsCard: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  statLabel: {
+  subtitle: {
     fontSize: 14,
+    opacity: 0.7,
+    marginTop: 4,
   },
-  statDivider: {
-    width: 1,
-    backgroundColor: '#E0E0E0',
-    marginHorizontal: 8,
-  },
-  sectionContainer: {
-    marginBottom: 24,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 12,
-  },
-  seeAllText: {
-    fontSize: 14,
-  },
-  appItem: {
-    borderRadius: 12,
+  usageStatsContainer: {
+    gap: 8,
+    marginBottom: 16,
     padding: 16,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-    backgroundColor: 'white',
-  },
-  appHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  appIconContainer: {
-    width: 40,
-    height: 40,
+    backgroundColor: 'rgba(0,0,0,0.02)',
     borderRadius: 8,
-    justifyContent: 'center',
+    marginHorizontal: 16,
+  },
+  headerPlaceholder: {
+    width: 1,
+    height: 1,
+  },
+  permissionContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 8,
+  },
+  permissionIconContainer: {
     marginRight: 12,
   },
-  appInfo: {
+  permissionTextContainer: {
     flex: 1,
   },
-  appName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 2,
-  },
-  appCategory: {
-    fontSize: 12,
-  },
-  appUsageInfo: {
-    alignItems: 'flex-end',
-  },
-  usageText: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  goalText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  progressContainer: {
-    height: 6,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressBar: {
-    height: '100%',
-  },
-  summaryCard: {
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    marginBottom: 16,
-  },
-  summaryItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  summaryValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginVertical: 4,
-  },
-  summaryLabel: {
-    fontSize: 12,
-  },
-  actionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    borderRadius: 8,
-    marginHorizontal: 4,
-  },
-  actionText: {
-    color: '#FFFFFF',
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
-  challengeItem: {
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  challengeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  challengeInfo: {
-    flex: 1,
-  },
-  challengeTitle: {
-    fontSize: 16,
+  permissionTitle: {
     fontWeight: 'bold',
     marginBottom: 4,
   },
-  challengeDescription: {
+  permissionText: {
     fontSize: 14,
-    color: '#666',
+    opacity: 0.8,
   },
-  progressSection: {
-    marginBottom: 8,
+  permissionButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 4,
   },
-  progressLabelContainer: {
+  permissionButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  overviewContainer: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    backgroundColor: 'rgba(0,0,0,0.02)',
+    borderRadius: 8,
+    padding: 16,
+  },
+  overviewHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  appSelectionWrapper: {
+    marginBottom: 16,
+  },
+  appSelectionGrid: {
+    marginTop: 8,
+  },
+  appSelectionContainer: {
+    maxHeight: 150,
     marginBottom: 8,
   },
-  progressLabel: {
-    fontSize: 14,
+  appSelectionItem: {
+    flex: 1,
+    margin: 4,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  appSelectionItemContent: {
+    padding: 12,
+    alignItems: 'center',
+  },
+  appIconPlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  appName: {
+    textAlign: 'center',
+    marginVertical: 8,
     fontWeight: '500',
   },
-  progressMinutes: {
-    fontSize: 14,
+  appSelectionItemSelected: {
+    borderColor: '#2196F3',
+  },
+  selectAllContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  selectAllButton: {
+    padding: 8,
+    borderRadius: 4,
+    alignItems: 'center',
+    width: '48%',
+  },
+  dateFilterContainer: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: 'rgba(0,0,0,0.03)',
+    borderRadius: 8,
+  },
+  dateFilterTitle: {
+    fontWeight: 'bold',
+    marginBottom: 12,
+  },
+  filterContainer: {
+    backgroundColor: 'rgba(0,0,0,0.03)',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  datePickerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  dateInput: {
+    flex: 1,
+    marginLeft: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 4,
+    backgroundColor: '#fff',
+  },
+  filterButton: {
+    padding: 12,
+    borderRadius: 4,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  filterButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  errorText: {
+    color: 'red',
+    marginTop: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  appSelectionTitle: {
+    marginTop: 16,
+    marginBottom: 8,
   },
 });
