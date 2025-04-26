@@ -1,13 +1,15 @@
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppUsage } from '@/hooks/useAppUsage';
-import { AppUsage } from '@/data/mockData';
+import { AppUsage, Challenge, UserChallenge } from '@/data/mockData';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { useRouter } from 'expo-router';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const router = useRouter();
   
   const { 
     appUsage, 
@@ -16,20 +18,27 @@ export default function HomeScreen() {
     getGoalPercentage, 
     getMostUsedApps, 
     getOverGoalApps,
-    isOverWeeklyGoal
+    isOverWeeklyGoal,
+    getUserActiveChallenges,
+    getAppById
   } = useAppUsage();
   
   const mostUsedApps = getMostUsedApps().slice(0, 4); // Top 4 most used apps
   const overGoalApps = getOverGoalApps();
+  const userActiveChallenges = getUserActiveChallenges();
   
   const renderAppUsageItem = ({ item }: { item: AppUsage }) => {
     const weeklyUsage = getWeeklyUsage(item);
-    const goalPercentage = getGoalPercentage(item);
     const isOverGoal = isOverWeeklyGoal(item);
+    
+    // Calculate remaining minutes and percentage
+    const remainingMinutes = Math.max(0, item.weeklyGoal - weeklyUsage);
+    const remainingPercentage = Math.min(100, Math.round((remainingMinutes / item.weeklyGoal) * 100));
+    const isAlmostDepleted = remainingPercentage <= 20;
     
     return (
       <TouchableOpacity 
-        style={[styles.appItem, { borderColor: isOverGoal ? '#FF6B6B' : '#4CAF50' }]}
+        style={[styles.appItem, { borderColor: isAlmostDepleted ? '#FF3B30' : '#34C759' }]}
         activeOpacity={0.7}
       >
         <View style={styles.appHeader}>
@@ -43,11 +52,11 @@ export default function HomeScreen() {
             </Text>
           </View>
           <View style={styles.appUsageInfo}>
-            <Text style={[styles.usageText, { color: isOverGoal ? '#FF6B6B' : '#4CAF50' }]}>
-              {Math.floor(weeklyUsage / 60)}h {weeklyUsage % 60}m
+            <Text style={[styles.usageText, { color: isAlmostDepleted ? '#FF3B30' : '#34C759', fontWeight: '700' }]}>
+              {Math.floor(remainingMinutes / 60)}h {remainingMinutes % 60}m
             </Text>
-            <Text style={[styles.goalText, { color: colors.icon }]}>
-              Goal: {Math.floor(item.weeklyGoal / 60)}h {item.weeklyGoal % 60}m
+            <Text style={[styles.goalText, { color: colors.icon, fontWeight: '500' }]}>
+              Left of {Math.floor(item.weeklyGoal / 60)}h {item.weeklyGoal % 60}m
             </Text>
           </View>
         </View>
@@ -57,11 +66,64 @@ export default function HomeScreen() {
             style={[
               styles.progressBar, 
               { 
-                width: `${goalPercentage}%`,
-                backgroundColor: isOverGoal ? '#FF6B6B' : '#4CAF50'
+                width: `${remainingPercentage}%`,
+                backgroundColor: isAlmostDepleted ? '#FF3B30' : '#34C759'
               }
             ]} 
           />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+  
+  const renderActiveChallengeItem = ({ item }: { item: { challenge: Challenge; userChallenge: UserChallenge } }) => {
+    const { challenge, userChallenge } = item;
+    const app = getAppById(challenge.appId);
+    if (!app) return null;
+    
+    const progress = Math.min(Math.round((userChallenge.currentUsage / challenge.targetMinutes) * 100), 100);
+    
+    return (
+      <TouchableOpacity 
+        style={[styles.challengeItem, { backgroundColor: colors.background }]}
+        activeOpacity={0.7}
+        onPress={() => router.push('/goals')}
+      >
+        <View style={styles.challengeHeader}>
+          <View style={[styles.appIconContainer, { backgroundColor: app.color }]}>
+            <Ionicons name={app.icon as any} size={24} color="#FFFFFF" />
+          </View>
+          <View style={styles.challengeInfo}>
+            <Text style={[styles.challengeTitle, { color: colors.text }]}>
+              {challenge.title}
+            </Text>
+            <Text style={[styles.challengeDescription, { color: colors.icon }]}>
+              {challenge.description}
+            </Text>
+          </View>
+        </View>
+        
+        <View style={styles.progressSection}>
+          <View style={styles.progressLabelContainer}>
+            <Text style={[styles.progressLabel, { color: colors.text }]}>
+              Progress: {progress}%
+            </Text>
+            <Text style={[styles.progressMinutes, { color: colors.icon }]}>
+              {userChallenge.currentUsage} / {challenge.targetMinutes} minutes
+            </Text>
+          </View>
+          
+          <View style={styles.progressContainer}>
+            <View 
+              style={[
+                styles.progressBar, 
+                { 
+                  width: `${progress}%`,
+                  backgroundColor: progress >= 100 ? '#4CAF50' : colors.tint
+                }
+              ]} 
+            />
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -72,33 +134,52 @@ export default function HomeScreen() {
       {/* Header Section */}
       <View style={styles.headerSection}>
         <View style={styles.welcomeContainer}>
-          <Text style={[styles.welcomeText, { color: colors.text }]}>
+          <Text style={[styles.welcomeText, { color: colors.text, fontWeight: '700' }]}>
             Welcome back, {userProfile.name}!
           </Text>
-          <Text style={[styles.streakText, { color: colors.icon }]}>
+          <Text style={[styles.streakText, { color: colors.icon, fontWeight: '600' }]}>
             🔥 {userProfile.streakDays} day streak
           </Text>
         </View>
         
         <View style={[styles.statsCard, { backgroundColor: colors.background }]}>
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: colors.text }]}>{userProfile.points}</Text>
-            <Text style={[styles.statLabel, { color: colors.icon }]}>Points</Text>
+            <Text style={[styles.statValue, { color: colors.text, fontWeight: '700' }]}>{userProfile.points}</Text>
+            <Text style={[styles.statLabel, { color: colors.icon, fontWeight: '500' }]}>Points</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: colors.text }]}>
+            <Text style={[styles.statValue, { color: colors.text, fontWeight: '700' }]}>
               {Math.floor(userProfile.totalSavedTime / 60)}h {userProfile.totalSavedTime % 60}m
             </Text>
-            <Text style={[styles.statLabel, { color: colors.icon }]}>Saved</Text>
+            <Text style={[styles.statLabel, { color: colors.icon, fontWeight: '500' }]}>Saved</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={[styles.statValue, { color: colors.text }]}>{overGoalApps.length}</Text>
-            <Text style={[styles.statLabel, { color: colors.icon }]}>Over Goal</Text>
+            <Text style={[styles.statValue, { color: colors.text, fontWeight: '700' }]}>{overGoalApps.length}</Text>
+            <Text style={[styles.statLabel, { color: colors.icon, fontWeight: '500' }]}>Over Goal</Text>
           </View>
         </View>
       </View>
+      
+      {/* Active Challenges Section */}
+      {userActiveChallenges.length > 0 && (
+        <View style={styles.sectionContainer}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Active Challenges</Text>
+            <TouchableOpacity onPress={() => router.push('/goals')}>
+              <Text style={[styles.seeAllText, { color: colors.tint }]}>See All</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <FlatList
+            data={userActiveChallenges}
+            renderItem={renderActiveChallengeItem}
+            keyExtractor={(item) => item.userChallenge.id}
+            scrollEnabled={false}
+          />
+        </View>
+      )}
       
       {/* Most Used Apps Section */}
       <View style={styles.sectionContainer}>
@@ -165,17 +246,25 @@ export default function HomeScreen() {
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Actions</Text>
         
         <View style={styles.actionsContainer}>
-          <TouchableOpacity style={[styles.actionButton, { backgroundColor: colors.tint }]}>
-            <Ionicons name="add-circle-outline" size={24} color="#FFFFFF" />
-            <Text style={styles.actionText}>New Goal</Text>
+          <TouchableOpacity 
+            style={[styles.actionButton, { backgroundColor: colors.tint }]}
+            onPress={() => router.push('/goals')}
+          >
+            <Ionicons name="trophy-outline" size={24} color="#FFFFFF" />
+            <Text style={styles.actionText}>Join Challenge</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}>
-            <Ionicons name="trophy-outline" size={24} color="#FFFFFF" />
+          <TouchableOpacity 
+            style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}
+            onPress={() => router.push('/rewards')}
+          >
+            <Ionicons name="gift-outline" size={24} color="#FFFFFF" />
             <Text style={styles.actionText}>Rewards</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={[styles.actionButton, { backgroundColor: '#FF6B6B' }]}>
+          <TouchableOpacity 
+            style={[styles.actionButton, { backgroundColor: '#FF6B6B' }]}
+          >
             <Ionicons name="alert-circle-outline" size={24} color="#FFFFFF" />
             <Text style={styles.actionText}>Over Goal</Text>
           </TouchableOpacity>
@@ -291,10 +380,11 @@ const styles = StyleSheet.create({
   },
   usageText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
   goalText: {
     fontSize: 12,
+    fontWeight: '500',
   },
   progressContainer: {
     height: 6,
@@ -347,5 +437,47 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: 'bold',
     marginLeft: 8,
+  },
+  challengeItem: {
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  challengeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  challengeInfo: {
+    flex: 1,
+  },
+  challengeTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  challengeDescription: {
+    fontSize: 14,
+    color: '#666',
+  },
+  progressSection: {
+    marginBottom: 8,
+  },
+  progressLabelContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  progressLabel: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  progressMinutes: {
+    fontSize: 14,
   },
 });

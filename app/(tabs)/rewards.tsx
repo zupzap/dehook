@@ -1,9 +1,21 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppUsage } from '@/hooks/useAppUsage';
 import { Reward } from '@/data/mockData';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+
+// Define brand colors for rewards
+const BRAND_COLORS = {
+  'social': '#E1306C', // Instagram color
+  'entertainment': '#FF0000', // YouTube color
+  'gaming': '#5865F2', // Gaming color
+  'productivity': '#0A84FF', // Productivity blue
+  'shopping': '#FF9900', // Amazon color
+  'travel': '#00256A', // Travel blue
+  'food': '#FF5A5F', // Food red
+  'fitness': '#34C759', // Fitness green
+};
 
 export default function RewardsScreen() {
   const colorScheme = useColorScheme();
@@ -19,66 +31,77 @@ export default function RewardsScreen() {
   const unlockedRewards = getUnlockedRewards();
   const lockedRewards = getLockedRewards();
   
-  const renderRewardItem = (reward: Reward, isLocked: boolean) => {
-    const formattedDate = reward.dateUnlocked 
-      ? new Date(reward.dateUnlocked).toLocaleDateString('en-US', { 
-          month: 'short', 
-          day: 'numeric', 
-          year: 'numeric' 
-        }) 
-      : '';
+  // Render a reward card in the new grid layout
+  const renderRewardCard = ({ item }: { item: Reward }) => {
+    const isLocked = !item.unlocked;
+    const brandColor = BRAND_COLORS[item.category as keyof typeof BRAND_COLORS] || colors.tint;
+    
+    // Format the cashback/discount text
+    const formatRewardValue = (reward: Reward) => {
+      if (reward.cashbackPercent) {
+        return `${reward.cashbackPercent}% Cashback`;
+      } else if (reward.discountAmount) {
+        return `Flat ₹${reward.discountAmount} Off`;
+      } else {
+        return `${reward.requiredPoints} Points`;
+      }
+    };
     
     return (
       <TouchableOpacity 
-        key={reward.id}
         style={[
           styles.rewardCard, 
           { 
             backgroundColor: colors.background,
-            opacity: isLocked ? 0.7 : 1
+            opacity: isLocked ? 0.7 : 1,
+            borderColor: isLocked ? '#E0E0E0' : brandColor,
           }
         ]}
         activeOpacity={0.7}
         disabled={isLocked}
       >
-        <View style={styles.rewardHeader}>
-          <View style={[
-            styles.rewardIconContainer, 
-            { backgroundColor: isLocked ? '#9E9E9E' : '#FFD700' }
-          ]}>
-            <Ionicons name={reward.icon as any} size={24} color="#FFFFFF" />
+        {/* Sale badge if applicable */}
+        {item.isSale && (
+          <View style={[styles.saleBadge, { backgroundColor: '#FF3B30' }]}>
+            <Text style={styles.saleText}>Sale Live Now</Text>
           </View>
-          <View style={styles.rewardInfo}>
-            <Text style={[styles.rewardTitle, { color: colors.text }]}>
-              {reward.title}
+        )}
+        
+        {/* Brand logo */}
+        <View style={styles.brandContainer}>
+          <View style={[styles.brandLogo, { backgroundColor: '#F8F8F8' }]}>
+            <Ionicons name={item.icon as any} size={32} color={brandColor} />
+          </View>
+        </View>
+        
+        {/* Reward details */}
+        <View style={styles.rewardDetails}>
+          <Text style={[styles.brandName, { color: colors.text }]}>
+            {item.title}
+          </Text>
+          
+          <TouchableOpacity style={styles.termsButton}>
+            <Text style={[styles.termsText, { color: colors.tint }]}>
+              {isLocked ? 'Locked' : 'Cashback Rates & Terms'}
             </Text>
-            <Text style={[styles.rewardDescription, { color: colors.icon }]}>
-              {reward.description}
+          </TouchableOpacity>
+          
+          <View style={[styles.cashbackButton, { backgroundColor: isLocked ? '#E0E0E0' : brandColor }]}>
+            <Text style={styles.cashbackText}>
+              {formatRewardValue(item)}
             </Text>
           </View>
         </View>
         
-        <View style={styles.rewardFooter}>
-          {isLocked ? (
-            <View style={styles.pointsContainer}>
-              <Ionicons name="star" size={16} color="#FFD700" />
-              <Text style={[styles.pointsText, { color: colors.text }]}>
-                {reward.requiredPoints} points required
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.unlockedContainer}>
-              <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
-              <Text style={[styles.unlockedText, { color: '#4CAF50' }]}>
-                Unlocked on {formattedDate}
-              </Text>
-            </View>
-          )}
-        </View>
-        
+        {/* Lock overlay for locked rewards */}
         {isLocked && (
           <View style={styles.lockOverlay}>
-            <Ionicons name="lock-closed" size={20} color="#FFFFFF" />
+            <View style={styles.lockIconContainer}>
+              <Ionicons name="lock-closed" size={24} color="#FFFFFF" />
+            </View>
+            <Text style={styles.lockText}>
+              Complete challenges to unlock
+            </Text>
           </View>
         )}
       </TouchableOpacity>
@@ -146,21 +169,35 @@ export default function RewardsScreen() {
         </View>
       </View>
       
-      {/* Unlocked Rewards Section */}
+      {/* Unlocked Rewards Section - Grid Layout */}
       {unlockedRewards.length > 0 && (
         <View style={styles.rewardsSection}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Unlocked Rewards</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Available Rewards</Text>
           
-          {unlockedRewards.map(reward => renderRewardItem(reward, false))}
+          <FlatList
+            data={unlockedRewards}
+            renderItem={renderRewardCard}
+            keyExtractor={(item) => item.id}
+            numColumns={2}
+            columnWrapperStyle={styles.rewardRow}
+            scrollEnabled={false}
+          />
         </View>
       )}
       
-      {/* Locked Rewards Section */}
+      {/* Locked Rewards Section - Grid Layout */}
       {lockedRewards.length > 0 && (
         <View style={styles.rewardsSection}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Locked Rewards</Text>
           
-          {lockedRewards.map(reward => renderRewardItem(reward, true))}
+          <FlatList
+            data={lockedRewards}
+            renderItem={renderRewardCard}
+            keyExtractor={(item) => item.id}
+            numColumns={2}
+            columnWrapperStyle={styles.rewardRow}
+            scrollEnabled={false}
+          />
         </View>
       )}
       
@@ -210,6 +247,20 @@ export default function RewardsScreen() {
               </Text>
             </View>
           </View>
+          
+          <View style={styles.infoItem}>
+            <View style={[styles.infoIconContainer, { backgroundColor: '#0A84FF' }]}>
+              <Ionicons name="trophy" size={24} color="#FFFFFF" />
+            </View>
+            <View style={styles.infoContent}>
+              <Text style={[styles.infoTitle, { color: colors.text }]}>
+                Complete Challenges
+              </Text>
+              <Text style={[styles.infoDescription, { color: colors.icon }]}>
+                +50-500 points for completing challenges based on difficulty
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
     </ScrollView>
@@ -222,6 +273,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     padding: 16,
+    paddingBottom: 32,
   },
   headerSection: {
     marginBottom: 24,
@@ -303,70 +355,104 @@ const styles = StyleSheet.create({
   rewardsSection: {
     marginBottom: 24,
   },
+  rewardRow: {
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   rewardCard: {
+    width: '48%',
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    position: 'relative',
+    overflow: 'hidden',
   },
-  rewardHeader: {
-    flexDirection: 'row',
-    marginBottom: 12,
+  saleBadge: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    padding: 4,
+    zIndex: 1,
+    alignItems: 'center',
   },
-  rewardIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  saleText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  brandContainer: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  brandLogo: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
-  },
-  rewardInfo: {
-    flex: 1,
-  },
-  rewardTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
     marginBottom: 4,
   },
-  rewardDescription: {
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  rewardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  pointsContainer: {
-    flexDirection: 'row',
+  rewardDetails: {
     alignItems: 'center',
   },
-  pointsText: {
+  brandName: {
     fontSize: 14,
-    marginLeft: 4,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    textAlign: 'center',
   },
-  unlockedContainer: {
-    flexDirection: 'row',
+  termsButton: {
+    marginBottom: 8,
+  },
+  termsText: {
+    fontSize: 10,
+    textDecorationLine: 'underline',
+  },
+  cashbackButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    width: '100%',
     alignItems: 'center',
   },
-  unlockedText: {
-    fontSize: 14,
-    marginLeft: 4,
+  cashbackText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    fontSize: 12,
   },
   lockOverlay: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    borderRadius: 12,
+  },
+  lockIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  lockText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+    textAlign: 'center',
+    paddingHorizontal: 8,
   },
   infoCard: {
     borderRadius: 12,

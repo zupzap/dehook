@@ -1,17 +1,19 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { ExternalLink } from '@/components/ExternalLink';
+import { useAppUsage } from '@/hooks/useAppUsage';
+import { clearAllData } from '@/utils/storage';
 
 export default function SettingsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const { resetAllData, isLoading } = useAppUsage();
   
   // Mock settings
   const [settings, setSettings] = useState({
-    darkMode: colorScheme === 'dark',
     notifications: true,
     dataSync: false,
     privacyMode: true,
@@ -22,6 +24,33 @@ export default function SettingsScreen() {
       ...prev,
       [key]: !prev[key]
     }));
+  };
+  
+  // Handle data reset
+  const handleResetData = () => {
+    Alert.alert(
+      'Reset All Data',
+      'Are you sure you want to reset all app data? This will delete all your progress, challenges, and settings.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel'
+        },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await resetAllData();
+              Alert.alert('Success', 'All data has been reset to default values.');
+            } catch (error) {
+              console.error('Error resetting data:', error);
+              Alert.alert('Error', 'Failed to reset data. Please try again.');
+            }
+          }
+        }
+      ]
+    );
   };
   
   // App info
@@ -49,6 +78,10 @@ export default function SettingsScreen() {
       question: 'Can I export my data?',
       answer: 'Currently, this feature is not available in the MVP version but will be added in future updates.'
     },
+    {
+      question: 'Where is my data stored?',
+      answer: 'All your data is stored locally on your device using AsyncStorage. This means your data persists even when you close the app.'
+    },
   ];
   
   const renderSettingItem = (
@@ -63,10 +96,10 @@ export default function SettingsScreen() {
         <Ionicons name={icon as any} size={20} color="#FFFFFF" />
       </View>
       <View style={styles.settingInfo}>
-        <Text style={[styles.settingTitle, { color: colors.text }]}>
+        <Text style={[styles.settingTitle, { color: colors.text, fontWeight: '600' }]}>
           {title}
         </Text>
-        <Text style={[styles.settingDescription, { color: colors.icon }]}>
+        <Text style={[styles.settingDescription, { color: colors.icon, fontWeight: '500' }]}>
           {description}
         </Text>
       </View>
@@ -87,14 +120,6 @@ export default function SettingsScreen() {
       {/* App Preferences */}
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>App Preferences</Text>
-        
-        {renderSettingItem(
-          'moon-outline', 
-          'Dark Mode', 
-          'Enable dark mode for the app', 
-          'darkMode',
-          '#6200EA'
-        )}
         
         {renderSettingItem(
           'notifications-outline', 
@@ -119,6 +144,45 @@ export default function SettingsScreen() {
           'privacyMode',
           '#FF6B6B'
         )}
+      </View>
+      
+      {/* Data Management */}
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Data Management</Text>
+        
+        <TouchableOpacity 
+          style={[styles.menuItem, { backgroundColor: colors.background }]}
+          disabled={isLoading}
+          onPress={handleResetData}
+        >
+          <View style={[styles.iconContainer, { backgroundColor: '#FF3B30' }]}>
+            <Ionicons name="refresh-outline" size={20} color="#FFFFFF" />
+          </View>
+          <View style={styles.menuInfo}>
+            <Text style={[styles.menuTitle, { color: colors.text }]}>
+              Reset All Data
+            </Text>
+            <Text style={[styles.menuDescription, { color: colors.icon }]}>
+              Reset all app data to default values
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.icon} />
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.menuItem, { backgroundColor: colors.background }]}>
+          <View style={[styles.iconContainer, { backgroundColor: '#5856D6' }]}>
+            <Ionicons name="download-outline" size={20} color="#FFFFFF" />
+          </View>
+          <View style={styles.menuInfo}>
+            <Text style={[styles.menuTitle, { color: colors.text }]}>
+              Export Data
+            </Text>
+            <Text style={[styles.menuDescription, { color: colors.icon }]}>
+              Export your usage data (Coming soon)
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.icon} />
+        </TouchableOpacity>
       </View>
       
       {/* Account */}
@@ -199,20 +263,22 @@ export default function SettingsScreen() {
           
           <View style={styles.aboutLinks}>
             <ExternalLink
-              href="https://example.com/privacy"
               style={[styles.aboutLink, { color: colors.tint }]}
-            >
-              Privacy Policy
-            </ExternalLink>
-            <ExternalLink
               href="https://example.com/terms"
-              style={[styles.aboutLink, { color: colors.tint }]}
             >
               Terms of Service
             </ExternalLink>
+            <Text style={{ color: colors.icon }}>•</Text>
             <ExternalLink
-              href="https://example.com/contact"
               style={[styles.aboutLink, { color: colors.tint }]}
+              href="https://example.com/privacy"
+            >
+              Privacy Policy
+            </ExternalLink>
+            <Text style={{ color: colors.icon }}>•</Text>
+            <ExternalLink
+              style={[styles.aboutLink, { color: colors.tint }]}
+              href="https://example.com/contact"
             >
               Contact Us
             </ExternalLink>
